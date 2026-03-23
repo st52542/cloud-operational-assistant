@@ -2,8 +2,25 @@
 
 > **Agent-assisted operational service deployed on Kubernetes with CI/CD, observability and secure internal integrations**
 
-Operational assistant for support workflows deployed as a cloud-native service on Kubernetes.  
+Cloud-native operational assistant for support workflows, designed to demonstrate patterns used in platform engineering, internal tooling and AIOps-style automation.
 The system accepts structured incident requests via API, routes them through an orchestration layer to the appropriate tool adapter, stores results with full audit trail, and exposes operational metrics — all running on AWS EKS with automated deployments via GitHub Actions.
+
+---
+
+## What this project demonstrates
+
+This project demonstrates practical design of a cloud-native operational service with:
+
+- Kubernetes-based deployment on AWS
+- CI/CD automation with GitHub Actions
+- modular orchestration and adapter-based integration
+- structured observability and audit logging
+- security-focused runtime configuration
+- architecture patterns relevant to internal support automation and AIOps-style workflows
+
+## Real-world relevance
+
+The design reflects patterns commonly used in internal platform tooling, support automation and operational systems where requests must be validated, routed to the correct integration layer, executed safely and recorded with a full audit trail.
 
 ---
 
@@ -335,3 +352,14 @@ Pod stdout → Fluent Bit DaemonSet → CloudWatch Log Group → Insights querie
 | **Helm chart** | Parameterise K8s manifests for multi-environment deployments |
 | **Terraform** | IaC for EKS cluster, ECR repo, IAM roles, VPC |
 | **Dependency scanning** | Add `pip-audit` to CI pipeline for CVE scanning of Python dependencies |
+
+---
+## Design Focus
+
+This project intentionally prioritises:
+- clear separation of concerns
+- auditability of operations
+- secure-by-default configuration
+- extensibility of integrations
+
+over feature completeness.
