@@ -7,6 +7,166 @@ The system accepts structured incident requests via API, routes them through an 
 
 ---
 
+## Quick Start
+
+### Prerequisites
+
+Install the following tools:
+
+```bash
+# Mac
+brew install awscli eksctl kubectl
+brew install --cask docker
+
+# Windows (PowerShell as admin)
+winget install Amazon.AWSCLI
+choco install eksctl kubernetes-cli
+
+# Linux
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip awscliv2.zip && sudo ./aws/install
+curl --silent --location "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+sudo mv /tmp/eksctl /usr/local/bin
+curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install kubectl /usr/local/bin/
+```
+
+Verify:
+```bash
+aws --version && eksctl version && kubectl version --client && docker --version
+```
+
+### 1. Configure AWS credentials
+
+Create an AWS account at [aws.amazon.com](https://aws.amazon.com) (new customers receive $100 in credits).
+
+Then create an IAM user:
+1. Go to **IAM → Users → Create user**
+2. Name: anything, e.g. `deploy-user`
+3. Permissions: `AdministratorAccess`
+4. Create **Access key** (type: CLI) and download the CSV
+
+Configure the CLI:
+```bash
+aws configure
+# AWS Access Key ID:     <from CSV>
+# AWS Secret Access Key: <from CSV>
+# Default region:        eu-west-2
+# Default output format: json
+```
+
+Verify:
+```bash
+aws sts get-caller-identity
+```
+
+### 2. Deploy — one command
+
+```bash
+chmod +x deploy/scripts/bootstrap.sh
+./deploy/scripts/bootstrap.sh
+```
+
+This will automatically:
+- Create an ECR repository
+- Build and push the Docker image (linux/amd64)
+- Create an EKS cluster (~15 minutes)
+- Deploy the application to Kubernetes
+
+When complete you will see:
+```
+✅ ECR repository created
+✅ Docker image pushed
+✅ EKS cluster ready
+✅ Application deployed
+
+Test the app:
+  kubectl port-forward -n operational-assistant svc/operational-assistant-svc 8080:80
+  curl http://localhost:8080/health
+```
+
+### 3. Test the API
+
+```bash
+# Start port-forward
+kubectl port-forward -n operational-assistant svc/operational-assistant-svc 8080:80
+```
+
+In a second terminal:
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Version
+curl http://localhost:8080/version
+
+# Create an operational request
+curl -X POST http://localhost:8080/request \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_type": "check_service_status",
+    "target_service": "payment-service",
+    "environment": "production"
+  }'
+
+# Other request types
+curl -X POST http://localhost:8080/request \
+  -H "Content-Type: application/json" \
+  -d '{"request_type": "get_logs", "target_service": "auth-service", "environment": "staging", "parameters": {"limit": 10}}'
+
+curl -X POST http://localhost:8080/request \
+  -H "Content-Type: application/json" \
+  -d '{"request_type": "get_deployment_info", "target_service": "api-gateway", "environment": "production"}'
+
+curl -X POST http://localhost:8080/request \
+  -H "Content-Type: application/json" \
+  -d '{"request_type": "simulate_restart", "target_service": "worker-service", "environment": "staging"}'
+
+curl -X POST http://localhost:8080/request \
+  -H "Content-Type: application/json" \
+  -d '{"request_type": "summarize_incident", "target_service": "payment-service", "environment": "production"}'
+
+# Get result by ID
+curl http://localhost:8080/requests/<request_id>
+
+# Runtime metrics
+curl http://localhost:8080/metrics
+```
+
+### 4. Cleanup
+
+When you are done, delete all AWS resources to stop billing:
+
+```bash
+chmod +x deploy/scripts/destroy.sh
+./deploy/scripts/destroy.sh
+```
+
+> ⚠️ This permanently deletes the EKS cluster and ECR repository including all images.
+
+---
+
+## CI/CD — GitHub Actions
+
+Every `git push` to `main` automatically:
+1. Runs lint (ruff) and unit tests (pytest)
+2. Builds a Docker image tagged with the commit SHA
+3. Pushes to ECR
+4. Deploys to EKS via rolling update
+
+### Setup
+
+In your GitHub repository go to **Settings → Secrets and variables → Actions** and add:
+
+| Secret | Value |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | from IAM CSV |
+| `AWS_SECRET_ACCESS_KEY` | from IAM CSV |
+| `APP_API_KEY` | any string, e.g. `demo-key-123` |
+
+---
+
 ## Architecture
 
 ```
@@ -60,7 +220,7 @@ The system accepts structured incident requests via API, routes them through an 
 | Component | Technology |
 |---|---|
 | Backend | Python 3.12, FastAPI |
-| Container | Docker (multi-stage, non-root) |
+| Container | Docker (multi-stage, non-root, linux/amd64) |
 | Orchestration | Kubernetes on AWS EKS |
 | Image Registry | AWS ECR |
 | CI/CD | GitHub Actions |
@@ -80,22 +240,9 @@ The system accepts structured incident requests via API, routes them through an 
 | `GET` | `/requests/{id}` | Fetch request result |
 | `GET` | `/metrics` | Runtime statistics |
 
-### POST /request — example
-
-```bash
-curl -X POST http://localhost:8080/request \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request_type": "check_service_status",
-    "target_service": "payment-service",
-    "environment": "production",
-    "parameters": {}
-  }'
-```
-
 **Supported `request_type` values:**
 
-| Value | Adapter used | Description |
+| Value | Adapter | Description |
 |---|---|---|
 | `check_service_status` | service_status_adapter | Health, replicas, resource usage |
 | `get_logs` | log_adapter | Recent log entries with optional level filter |
@@ -105,33 +252,7 @@ curl -X POST http://localhost:8080/request \
 
 ---
 
-## Deployment Flow
-
-```
-git push origin main
-        │
-        ▼
-  GitHub Actions
-        │
-        ├── 1. Lint (ruff) + Unit tests (pytest)
-        │
-        ├── 2. Build Docker image
-        │       └─ tag: <short-git-sha>
-        │
-        ├── 3. Trivy image vulnerability scan (blocks on CRITICAL)
-        │
-        ├── 4. Push image to AWS ECR
-        │
-        └── 5. Deploy to EKS  [requires "production" environment approval]
-                ├─ kubectl apply namespace, RBAC, ConfigMap
-                ├─ Inject secrets from GitHub Secrets → K8s Secret
-                ├─ kubectl set image (rolling update)
-                └─ kubectl rollout status (waits 120s)
-```
-
----
-
-## Running Locally
+## Running Locally (without AWS)
 
 ```bash
 # Install dependencies
@@ -146,23 +267,34 @@ pytest tests/ -v
 
 ---
 
+## Estimated AWS Cost
+
+| Scenario | Cost |
+|---|---|
+| Cluster running for 3 hours (demo) | ~$0.60 |
+| Cluster running for a full day | ~$5.00 |
+| ECR storage (~200MB image) | ~$0.02/month |
+| New AWS customers | $100 credits on sign-up |
+
+> Always run `./deploy/scripts/destroy.sh` after your demo to stop billing.
+
+---
+
 ## Security Considerations
 
 | Concern | Mitigation |
 |---|---|
-| **Secrets in repo** | None committed. Injected at deploy-time from GitHub Secrets via `kubectl apply` pipeline step |
+| **Secrets in repo** | None committed. Injected at deploy-time from GitHub Secrets |
 | **Container privileges** | Non-root user (UID 1001), `readOnlyRootFilesystem`, all Linux capabilities dropped |
 | **K8s RBAC** | Dedicated ServiceAccount with minimal Role (read ConfigMaps/Pods only) |
-| **Input validation** | Pydantic models with regex validation on `target_service`, enum constraints on `request_type` and `environment` |
-| **Network isolation** | NetworkPolicy allows ingress only from `kube-system` namespace, egress only DNS + HTTPS |
+| **Input validation** | Pydantic models with regex on `target_service`, enum constraints on `request_type` and `environment` |
+| **Network isolation** | NetworkPolicy allows ingress only from `kube-system`, egress only DNS + HTTPS |
 | **IAM** | IRSA (IAM Roles for Service Accounts) — no static credentials in pods |
 | **Image scanning** | Trivy runs in CI pipeline, blocks on CRITICAL CVEs |
 
 ---
 
 ## Observability
-
-### Structured logs (JSON)
 
 Every request emits structured JSON to stdout:
 
@@ -179,33 +311,15 @@ Every request emits structured JSON to stdout:
 }
 ```
 
-### Log forwarding (concept)
-
-In production, stdout logs flow to **CloudWatch Logs** via the EKS Fluent Bit DaemonSet:
-
-```
-Pod stdout
-  └─▶ Fluent Bit DaemonSet (per node)
-        └─▶ CloudWatch Log Group: /eks/operational-assistant/app
-              └─▶ CloudWatch Insights queries / alarms
+View live logs from the cluster:
+```bash
+kubectl logs -n operational-assistant -l app=operational-assistant -f
 ```
 
-### Metrics endpoint
-
-`GET /metrics` returns runtime counters suitable for polling from Prometheus or a dashboard:
-
-```json
-{
-  "total_requests": 42,
-  "successful_requests": 40,
-  "failed_requests": 2,
-  "requests_by_type": {"check_service_status": 20, "get_logs": 15, ...},
-  "average_duration_ms": 34.5,
-  "uptime_seconds": 3600.0
-}
+In production, stdout logs flow to CloudWatch Logs via the EKS Fluent Bit DaemonSet:
 ```
-
-**Prometheus integration path (bonus):** replace `MetricsStore` with `prometheus_client` counters and expose `/metrics` in Prometheus exposition format — zero changes to the rest of the app.
+Pod stdout → Fluent Bit DaemonSet → CloudWatch Log Group → Insights queries / alarms
+```
 
 ---
 
