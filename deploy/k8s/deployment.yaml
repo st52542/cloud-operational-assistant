@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operational-assistant
+  namespace: operational-assistant
+  labels:
+    app: operational-assistant
+    version: "latest"
+  annotations:
+    kubernetes.io/change-cause: "Deployed via GitHub Actions"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: operational-assistant
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        app: operational-assistant
+    spec:
+      # Non-root security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      serviceAccountName: operational-assistant-sa
+
+      containers:
+        - name: operational-assistant
+          image: 258083582728.dkr.ecr.eu-west-2.amazonaws.com/operational-assistant:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+
+          envFrom:
+            - configMapRef:
+                name: operational-assistant-config
+            - secretRef:
+                name: operational-assistant-secrets
+
+          env:
+            - name: BUILD_COMMIT
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['kubernetes.io/change-cause']
+
+          # ── Resource limits ───────────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          # ── Liveness probe ────────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          # ── Readiness probe ───────────────────────────────────────────────
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          # ── Container security ────────────────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            - name: data-volume
+              mountPath: /data
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: data-volume
+          emptyDir: {}   # Replace with PVC for persistent storage in production
+        - name: tmp-volume
+          emptyDir: {}
+
+      # Spread pods across AZs
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: operational-assistant

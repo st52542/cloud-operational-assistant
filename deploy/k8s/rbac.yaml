@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: operational-assistant-sa
+  namespace: operational-assistant
+  labels:
+    app: operational-assistant
+  annotations:
+    # IRSA: bind to AWS IAM role for ECR / Secrets Manager access
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789:role/operational-assistant-role
+automountServiceAccountToken: false
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: operational-assistant-role
+  namespace: operational-assistant
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: operational-assistant-rolebinding
+  namespace: operational-assistant
+subjects:
+  - kind: ServiceAccount
+    name: operational-assistant-sa
+    namespace: operational-assistant
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: operational-assistant-role
