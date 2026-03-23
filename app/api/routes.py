@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 from app.models.schemas import (
-    Environment,
     HealthResponse,
     MetricsResponse,
     OperationalRequestCreate,
@@ -18,7 +17,6 @@ from app.observability.logger import get_logger
 from app.observability.metrics import metrics_store
 from app.services.orchestrator import process_request
 from app.storage.database import (
-    count_by_status,
     count_requests_by_env,
     count_requests_by_type,
     create_request,
@@ -135,7 +133,6 @@ def get_operational_request(request_id: str):
 
 @router.get("/metrics", response_model=MetricsResponse, tags=["ops"])
 def get_metrics():
-    status_counts = count_by_status()
     return MetricsResponse(
         total_requests=metrics_store.total_requests,
         successful_requests=metrics_store.successful_requests,

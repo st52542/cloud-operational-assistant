@@ -116,9 +116,9 @@ def _summarize_incident(adapter, target_service: str, environment: str, paramete
     log_data = adapter.run(target_service, environment, {**parameters, "limit": 30})
     logs = log_data.get("logs", [])
 
-    error_count = sum(1 for l in logs if l["level"] == "ERROR")
-    warn_count = sum(1 for l in logs if l["level"] == "WARN")
-    info_count = sum(1 for l in logs if l["level"] == "INFO")
+    error_count = sum(1 for entry in logs if entry["level"] == "ERROR")
+    warn_count = sum(1 for entry in logs if entry["level"] == "WARN")
+    info_count = sum(1 for entry in logs if entry["level"] == "INFO")
 
     severity = "low"
     if error_count >= 5:
@@ -126,7 +126,7 @@ def _summarize_incident(adapter, target_service: str, environment: str, paramete
     elif error_count >= 2 or warn_count >= 5:
         severity = "medium"
 
-    unique_errors = list({l["message"] for l in logs if l["level"] == "ERROR"})
+    unique_errors = list({entry["message"] for entry in logs if entry["level"] == "ERROR"})
 
     return {
         "adapter": "incident_summarizer",
@@ -175,11 +175,11 @@ def summarize(raw_result: dict, plan_result: dict) -> dict:
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def process_request(
-    request_id: str,
-    request_type: str,
-    target_service: str,
-    environment: str,
-    parameters: dict,
+        request_id: str,
+        request_type: str,
+        target_service: str,
+        environment: str,
+        parameters: dict,
 ) -> tuple[dict, float]:
     """Full planner -> executor -> summarizer pipeline. Returns (result, duration_ms)."""
     logger.info(
